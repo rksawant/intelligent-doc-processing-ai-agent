@@ -241,44 +241,72 @@ class S3Service:
             logger.error(f"Error moving document from {source_key} to {dest_key}: {e}")
             return False
     
-    def upload_processed_document(self, content: str, original_filename: str, processing_metadata: Dict[str, str]) -> Optional[str]:
+    def upload_processed_document(
+    self,
+    content: Any,
+    original_filename: str,
+    processing_metadata: Dict[str, Any]
+    ) -> Optional[str]:
         """
-        Upload processed document with metadata
-        
-        Args:
-            content: Processed document content
-            original_filename: Original filename
-            processing_metadata: Processing metadata
-            
-        Returns:
-            S3 key if successful, None otherwise
+        Upload processed document with metadata to S3.
+        Handles str, bytes, dict, and mixed metadata safely.
         """
+        import os, re, logging
+        from datetime import datetime
+        from botocore.exceptions import ClientError
+
+        logger = logging.getLogger(__name__)
+
         try:
-            # Generate S3 key with timestamp
             timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
             filename = os.path.splitext(original_filename)[0]
             s3_key = f"{self.processed_prefix}{filename}_{timestamp}.txt"
-            
-            # Add processing metadata
-            metadata = {
-                'original_filename': original_filename,
-                'processed_timestamp': timestamp,
-                **processing_metadata
+
+            # 🧠 Normalize metadata: convert all values to strings
+            raw_metadata = {
+                "original_filename": original_filename,
+                "processed_timestamp": timestamp,
+                **(processing_metadata or {})
             }
-            
-            # Upload content
+            metadata = {str(k): str(v) for k, v in raw_metadata.items() if v is not None}
+
+            # 🧠 Prepare body content
+            if isinstance(content, bytes):
+                body = content
+            elif isinstance(content, str):
+                clean = re.sub(r"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]", "", content)
+                body = clean.encode("utf-8", errors="replace")
+            else:
+                body = str(content).encode("utf-8", errors="replace")
+
+            # Debug preview
+            logger.debug(f"S3 Upload Summary:")
+            logger.debug(f"  Bucket: {self.bucket_name}")
+            logger.debug(f"  Key: {s3_key}")
+            logger.debug(f"  Metadata: {metadata}")
+            logger.debug(f"  Body Preview: {body[:200]!r}")
+
+            # ✅ Upload to S3
             self.s3_client.put_object(
                 Bucket=self.bucket_name,
                 Key=s3_key,
-                Body=content,
-                ContentType='text/plain',
+                Body=body,
+                ContentType="text/plain",
                 Metadata=metadata
             )
-            
-            logger.info(f"Successfully uploaded processed document to s3://{self.bucket_name}/{s3_key}")
+
+            logger.info(f"✅ Uploaded successfully: s3://{self.bucket_name}/{s3_key}")
             return s3_key
-            
+
         except ClientError as e:
-            logger.error(f"Error uploading processed document: {e}")
+            logger.error(f"❌ S3 ClientError: {e}")
             return None
+
+        except Exception as e:
+            logger.error(f"⚠️ Unexpected error uploading processed document: {e}")
+            return None
+
+
+
+
 

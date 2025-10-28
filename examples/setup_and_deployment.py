@@ -29,7 +29,6 @@ class AWSSetupManager:
         self.s3_client = self.session.client('s3')
         self.lambda_client = self.session.client('lambda')
         self.iam_client = self.session.client('iam')
-        self.opensearch_client = self.session.client('opensearch')
         self.bedrock_client = self.session.client('bedrock')
         
     def check_aws_credentials(self) -> bool:
@@ -171,7 +170,7 @@ class AWSSetupManager:
                     "arn:aws:iam::aws:policy/AmazonS3FullAccess",
                     "arn:aws:iam::aws:policy/AmazonBedrockFullAccess",
                     "arn:aws:iam::aws:policy/AmazonTextractFullAccess",
-                    "arn:aws:iam::aws:policy/AmazonOpenSearchFullAccess"
+                    "arn:aws:iam::aws:policy/AmazonPineconeFullAccess"
                 ]
                 
                 for policy_arn in additional_policies:
@@ -256,7 +255,7 @@ class AWSSetupManager:
             return {}
     
     def setup_opensearch(self) -> bool:
-        """Set up OpenSearch domain for vector search"""
+        """Set up Pinecone domain for vector search"""
         try:
             domain_name = "ai-agent-opensearch"
             
@@ -265,13 +264,13 @@ class AWSSetupManager:
                 response = self.opensearch_client.describe_domain(DomainName=domain_name)
                 domain_status = response['DomainStatus']['Processing']
                 if domain_status:
-                    print(f"✓ OpenSearch domain '{domain_name}' already exists")
+                    print(f"✓ Pinecone domain '{domain_name}' already exists")
                     return True
             except ClientError:
                 pass
             
-            # Create OpenSearch domain
-            print(f"  Note: OpenSearch domain '{domain_name}' needs to be created manually")
+            # Create Pinecone domain
+            print(f"  Note: Pinecone domain '{domain_name}' needs to be created manually")
             print("    - Use AWS Console or CLI to create the domain")
             print("    - Choose appropriate instance type and storage")
             print("    - Configure access policies")
@@ -282,7 +281,7 @@ class AWSSetupManager:
             return True
             
         except ClientError as e:
-            print(f"✗ OpenSearch setup error: {e}")
+            print(f"✗ Pinecone setup error: {e}")
             return False
     
     def create_environment_file(self) -> bool:
@@ -302,8 +301,8 @@ S3_BUCKET_NAME={aws_config.s3_bucket_name}
 S3_PROCESSED_PREFIX={aws_config.s3_processed_prefix}
 S3_RAW_PREFIX={aws_config.s3_raw_prefix}
 
-# OpenSearch Configuration
-OPENSEARCH_ENDPOINT=https://your-opensearch-domain.{aws_config.aws_region}.es.amazonaws.com
+# Pinecone Configuration
+PINECONE_INDEX_NAME=https://your-opensearch-domain.{aws_config.aws_region}.es.amazonaws.com
 OPENSEARCH_INDEX_NAME={aws_config.opensearch_index_name}
 
 # Lambda Configuration
@@ -364,7 +363,7 @@ TOP_K_RESULTS={rag_config.top_k_results}
             if not functions:
                 success = False
         
-        # Set up OpenSearch
+        # Set up Pinecone
         if not self.setup_opensearch():
             success = False
         
@@ -378,7 +377,7 @@ TOP_K_RESULTS={rag_config.top_k_results}
             print("=" * 60)
             print("\nNext Steps:")
             print("1. Update the .env file with your actual AWS credentials")
-            print("2. Create OpenSearch domain manually")
+            print("2. Create Pinecone domain manually")
             print("3. Deploy Lambda functions with deployment packages")
             print("4. Test the system with sample documents")
             print("5. Configure monitoring and logging")

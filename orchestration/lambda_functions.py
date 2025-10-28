@@ -8,7 +8,7 @@ from typing import Dict, Any, List
 from datetime import datetime
 
 # AWS services
-from services import BedrockService, S3Service, OpenSearchService, TextractService
+from services import BedrockService, S3Service, PineconeService, TextractService
 from agents import DocumentProcessor, RAGSystem, KnowledgeAgent, LegalAgent
 
 logger = logging.getLogger()
@@ -138,7 +138,7 @@ def generate_embeddings_handler(event: Dict[str, Any], context) -> Dict[str, Any
         
         # Initialize services
         bedrock_service = BedrockService()
-        opensearch_service = OpenSearchService()
+        pinecone_service = PineconeService()
         
         # Generate embeddings
         embeddings = bedrock_service.generate_embeddings(text_chunks)
@@ -148,7 +148,7 @@ def generate_embeddings_handler(event: Dict[str, Any], context) -> Dict[str, Any
         for i, (chunk, embedding) in enumerate(zip(text_chunks, embeddings)):
             chunk_id = f"{document_id}_chunk_{i}"
             
-            success = opensearch_service.index_document(
+            success = pinecone_service.index_document(
                 chunk_id,
                 chunk,
                 embedding,

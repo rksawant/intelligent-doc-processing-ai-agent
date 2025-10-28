@@ -60,39 +60,41 @@ class BedrockService:
             logger.error(f"Error generating text: {e}")
             raise
     
-    def generate_embeddings(self, texts: List[str]) -> List[List[float]]:
+    def generate_embeddings(self, texts: List[Any]) -> List[List[float]]:
         """
         Generate embeddings for a list of texts using Titan embeddings
-        
-        Args:
-            texts: List of texts to embed
-            
-        Returns:
-            List of embedding vectors
         """
         try:
             embeddings = []
-            
-            for text in texts:
-                body = json.dumps({
-                    "inputText": text
-                })
-                
+            logger.debug(f"Embedding {len(texts)} chunks; first type: {type(texts[0])}")
+
+            for item in texts:
+                # ✅ Handle Document objects automatically
+                if hasattr(item, "page_content"):
+                    text = item.page_content
+                elif isinstance(item, dict) and "page_content" in item:
+                    text = item["page_content"]
+                else:
+                    text = str(item)
+
+                body = json.dumps({"inputText": text})
+
                 response = self.bedrock_runtime.invoke_model(
                     modelId=self.embeddings_model,
                     body=body,
                     contentType="application/json"
                 )
-                
+
                 response_body = json.loads(response['body'].read())
                 embedding = response_body['embedding']
                 embeddings.append(embedding)
-            
+
             return embeddings
-            
+
         except ClientError as e:
             logger.error(f"Error generating embeddings: {e}")
             raise
+
     
     def chat_with_context(self, question: str, context: str, system_prompt: Optional[str] = None) -> str:
         """

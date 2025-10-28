@@ -116,53 +116,155 @@ Always prioritize accuracy and clarity in your responses."""
             logger.error(f"Error processing and indexing document from bytes: {e}")
             return {'error': str(e)}
     
-    def ask_question(self, question: str, context_limit: Optional[int] = None,
-                    document_filter: Optional[str] = None) -> Dict[str, Any]:
-        """
-        Ask a question and get an answer using RAG
+    # def ask_question(self, question: str, context_limit: Optional[int] = None,
+    #                 document_filter: Optional[str] = None) -> Dict[str, Any]:
+    #     """
+    #     Ask a question and get an answer using RAG
         
-        Args:
-            question: Question to ask
-            context_limit: Maximum number of context chunks to use
-            document_filter: Optional document ID to limit search to
+    #     Args:
+    #         question: Question to ask
+    #         context_limit: Maximum number of context chunks to use
+    #         document_filter: Optional document ID to limit search to
             
-        Returns:
-            Answer with context and sources
+    #     Returns:
+    #         Answer with context and sources
+    #     """
+    #     try:
+    #         # Search for relevant context
+    #         if document_filter:
+    #             search_result = self.rag_system.get_document_context(
+    #                 document_filter, question, context_limit or 5
+    #             )
+                
+    #             if 'error' in search_result:
+    #                 return search_result
+                
+    #             # Build context from document-specific results
+    #             context_chunks = search_result['context_chunks']
+    #             context = "\n\n".join([chunk['content'] for chunk in context_chunks])
+                
+    #             # Generate answer
+    #             answer = self.bedrock_service.chat_with_context(
+    #                 question, context, self.system_prompt
+    #             )
+                
+    #             return {
+    #                 'success': True,
+    #                 'question': question,
+    #                 'answer': answer,
+    #                 'context_chunks': len(context_chunks),
+    #                 'document_id': document_filter,
+    #                 'sources': [{'document_id': document_filter, 'chunk_count': len(context_chunks)}]
+    #             }
+    #         else:
+    #             # Use general RAG search
+    #             return self.rag_system.answer_question(question, context_limit)
+            
+    #     except Exception as e:
+    #         logger.error(f"Error asking question: {e}")
+    #         return {'error': str(e)}
+
+    def ask_question(
+    self,
+    question: str,
+    context_limit: Optional[int] = None,
+    document_filter: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Ask a question and get an answer using RAG (Retrieval-Augmented Generation).
+
+        Improvements:
+        - Uses enhanced search_documents() with context_text.
+        - Auto-fallback if context is empty.
+        - Supports both general and document-specific Q&A.
+        - Logs retrieval stats for debugging.
         """
         try:
-            # Search for relevant context
+            logger.info(f"🧠 RAG Query: {question}")
+
+            # --- Case 1: Ask within specific document ---
             if document_filter:
+                logger.debug(f"Restricting search to document: {document_filter}")
+
                 search_result = self.rag_system.get_document_context(
                     document_filter, question, context_limit or 5
                 )
-                
-                if 'error' in search_result:
+
+                if "error" in search_result:
                     return search_result
-                
-                # Build context from document-specific results
-                context_chunks = search_result['context_chunks']
-                context = "\n\n".join([chunk['content'] for chunk in context_chunks])
-                
-                # Generate answer
+
+                context_chunks = search_result.get("context_chunks", [])
+                context = "\n".join(
+                    [c.get("content", "") for c in context_chunks if c.get("content")]
+                ).strip()
+
+                if not context:
+                    logger.warning("⚠️ No relevant context found in the specified document.")
+                    return {
+                        "success": True,
+                        "question": question,
+                        "answer": "No relevant information found in the document.",
+                        "context_chunks": 0
+                    }
+
+                # Call Bedrock for contextual Q&A
                 answer = self.bedrock_service.chat_with_context(
-                    question, context, self.system_prompt
+                    question=question,
+                    context=context,
+                    system_prompt=self.system_prompt
                 )
-                
+
                 return {
-                    'success': True,
-                    'question': question,
-                    'answer': answer,
-                    'context_chunks': len(context_chunks),
-                    'document_id': document_filter,
-                    'sources': [{'document_id': document_filter, 'chunk_count': len(context_chunks)}]
+                    "success": True,
+                    "question": question,
+                    "answer": answer,
+                    "context_chunks": len(context_chunks),
+                    "document_id": document_filter
                 }
+
+            # --- Case 2: General search across all indexed docs ---
             else:
-                # Use general RAG search
-                return self.rag_system.answer_question(question, context_limit)
-            
+                search_result = self.rag_system.search_documents(
+                    query=question,
+                    top_k=context_limit or 5
+                )
+
+                if "error" in search_result:
+                    return search_result
+
+                context_text = search_result.get("context_text", "")
+                results_count = search_result.get("total_results", 0)
+
+                if not context_text.strip():
+                    logger.warning("⚠️ No relevant context retrieved from knowledge base.")
+                    return {
+                        "success": True,
+                        "question": question,
+                        "answer": "No relevant context found to answer this question.",
+                        "context_chunks": 0
+                    }
+
+                # Call Bedrock using the merged context
+                logger.info(f"📚 Retrieved {results_count} context chunks. Sending to Bedrock...")
+                answer = self.bedrock_service.chat_with_context(
+                    question=question,
+                    context=context_text,
+                    system_prompt=self.system_prompt
+                )
+
+                return {
+                    "success": True,
+                    "question": question,
+                    "answer": answer,
+                    "context_chunks": results_count,
+                    "documents_considered": search_result.get("document_results", 0),
+                    "similarity_threshold": search_result.get("similarity_threshold")
+                }
+
         except Exception as e:
-            logger.error(f"Error asking question: {e}")
-            return {'error': str(e)}
+            logger.error(f"Error in ask_question: {e}")
+            return {"error": str(e)}
+
     
     def search_documents(self, query: str, top_k: Optional[int] = None,
                         filters: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:

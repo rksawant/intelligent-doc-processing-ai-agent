@@ -342,7 +342,7 @@ def main():
         print("✓ Knowledge base management")
         
         print("\nNext Steps:")
-        print("1. Configure AWS services (Bedrock, S3, OpenSearch)")
+        print("1. Configure AWS services (Bedrock, S3, Pinecone)")
         print("2. Set up environment variables")
         print("3. Deploy Lambda functions")
         print("4. Test with real documents")

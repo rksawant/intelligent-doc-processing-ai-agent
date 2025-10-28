@@ -1,6 +1,6 @@
 # AI Document Processing & Knowledge Retrieval Agents
 
-A comprehensive AI-powered system for document processing, knowledge retrieval, and legal contract analysis using AWS services including Bedrock, S3, OpenSearch, Lambda, and Textract.
+A comprehensive AI-powered system for document processing, knowledge retrieval, and legal contract analysis using AWS services including Bedrock, S3, Pinecone (vector DB), Lambda, and Textract.
 
 ## 🚀 Features
 
@@ -8,13 +8,13 @@ A comprehensive AI-powered system for document processing, knowledge retrieval, 
 - **Document Processing**: Extract text from PDFs, DOCX, TXT, and HTML files
 - **Knowledge Retrieval**: RAG-based question answering and document search
 - **Legal Contract Analysis**: Specialized agent for contract review and analysis
-- **Vector Search**: Semantic search using OpenSearch and embeddings
+- **Vector Search**: Semantic search using Pinecone (vector DB) and embeddings
 - **Pipeline Orchestration**: Serverless Lambda-based workflow management
 
 ### AWS Services Integration
 - **Amazon Bedrock**: LLM operations and embeddings generation
 - **Amazon S3**: Document storage and management
-- **Amazon OpenSearch**: Vector search and indexing
+- **Amazon Pinecone (vector DB)**: Vector search and indexing
 - **AWS Lambda**: Serverless pipeline orchestration
 - **Amazon Textract**: OCR and structured data extraction
 
@@ -32,7 +32,7 @@ A comprehensive AI-powered system for document processing, knowledge retrieval, 
 - Required AWS services enabled:
   - Amazon Bedrock
   - Amazon S3
-  - Amazon OpenSearch
+  - Amazon Pinecone (vector DB)
   - AWS Lambda
   - Amazon Textract
 
@@ -93,7 +93,7 @@ A comprehensive AI-powered system for document processing, knowledge retrieval, 
                     │                 │
                     │ • Bedrock       │
                     │ • S3            │
-                    │ • OpenSearch    │
+                    │ • Pinecone (vector DB)    │
                     │ • Lambda        │
                     │ • Textract      │
                     └─────────────────┘
@@ -216,7 +216,7 @@ S3_BUCKET_NAME=ai-agent-documents
 S3_PROCESSED_PREFIX=processed/
 S3_RAW_PREFIX=raw/
 
-# OpenSearch Configuration
+# Pinecone (vector DB) Configuration
 OPENSEARCH_ENDPOINT=https://your-domain.us-east-1.es.amazonaws.com
 OPENSEARCH_INDEX_NAME=document-embeddings
 
@@ -261,7 +261,7 @@ python examples/setup_and_deployment.py
 This will:
 - Create S3 bucket for document storage
 - Set up IAM roles and policies
-- Configure OpenSearch domain
+- Configure Pinecone (vector DB) domain
 - Create Lambda functions
 - Set up environment configuration
 
@@ -279,9 +279,9 @@ aws lambda update-function-code \
   --zip-file fileb://lambda-deployment.zip
 ```
 
-### 3. OpenSearch Setup
+### 3. Pinecone (vector DB) Setup
 
-Create OpenSearch domain with the following configuration:
+Create Pinecone (vector DB) domain with the following configuration:
 
 ```bash
 # Create domain
@@ -295,7 +295,7 @@ aws opensearch create-domain \
 
 ### CloudWatch Integration
 - Lambda function logs and metrics
-- OpenSearch cluster monitoring
+- Pinecone (vector DB) cluster monitoring
 - S3 access logs
 - Bedrock usage tracking
 
@@ -315,7 +315,7 @@ aws opensearch create-domain \
 
 ### Data Protection
 - Encryption at rest and in transit
-- VPC configuration for OpenSearch
+- VPC configuration for Pinecone (vector DB)
 - S3 bucket policies
 - Lambda execution environment isolation
 
@@ -345,12 +345,12 @@ python -m pytest tests/
 
 ### Scaling Considerations
 - Lambda concurrency limits
-- OpenSearch cluster sizing
+- Pinecone (vector DB) cluster sizing
 - S3 transfer acceleration
 - Bedrock rate limits
 
 ### Cost Optimization
-- Right-size OpenSearch instances
+- Right-size Pinecone (vector DB) instances
 - Optimize Lambda memory allocation
 - Use S3 Intelligent Tiering
 - Monitor Bedrock usage
@@ -390,3 +390,11 @@ For issues and questions:
 
 **Built with ❤️ using AWS services and Python**
 "# intelligent-doc-processing-ai-agent" 
+
+| Action          | Function Called                           | Description                                                               |
+| --------------- | ----------------------------------------- | ------------------------------------------------------------------------- |
+| Upload a file   | `process_and_index_document_from_bytes()` | Extracts text → Embeds → Stores in Pinecone → Uploads processed doc to S3 |
+| Ask question    | `ask_question()`                          | Executes full **RAG flow** (retrieval + Bedrock LLM)                      |
+| Suggest related | `suggest_related_questions()`             | Uses contextual search + LLM text generation                              |
+| View stats      | `get_knowledge_base_stats()`              | Aggregates Pinecone + S3 stats                                            |
+

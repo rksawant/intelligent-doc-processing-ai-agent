@@ -1,5 +1,9 @@
 """
 Legal Assistant Agent for contract analysis and legal document processing
+
+✅ Uploads and embeds documents into Pinecone
+
+✅ Retrieves top-k relevant chunks by vector similarity
 """
 import logging
 from typing import List, Dict, Any, Optional, Tuple

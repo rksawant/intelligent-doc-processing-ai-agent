@@ -322,7 +322,7 @@ def main():
         print("\nNext Steps:")
         print("1. Configure AWS credentials and services")
         print("2. Set up S3 bucket for document storage")
-        print("3. Configure OpenSearch for vector search")
+        print("3. Configure Pinecone for vector search")
         print("4. Deploy Lambda functions for orchestration")
         print("5. Test with real documents and contracts")
         

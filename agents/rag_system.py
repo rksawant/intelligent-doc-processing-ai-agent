@@ -10,7 +10,7 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.schema import Document
 
 # AWS services
-from services import BedrockService, OpenSearchService, S3Service
+from services import BedrockService, PineconeService, S3Service
 from config.config import rag_config, document_config
 
 logger = logging.getLogger(__name__)
@@ -20,7 +20,7 @@ class RAGSystem:
     
     def __init__(self):
         self.bedrock_service = BedrockService()
-        self.opensearch_service = OpenSearchService()
+        self.pinecone_service = PineconeService()
         self.s3_service = S3Service()
         
         # Text splitter configuration
@@ -37,112 +37,177 @@ class RAGSystem:
         self.max_context_length = rag_config.max_context_length
         self.top_k_results = rag_config.top_k_results
     
-    def index_document(self, document_id: str, text_content: str, 
-                      metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def index_document(self, document_id: str, text_content: str, metadata: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Index a document for RAG retrieval
-        
-        Args:
-            document_id: Unique document identifier
-            text_content: Document text content
-            metadata: Optional document metadata
-            
-        Returns:
-            Indexing result
+        Index a document by splitting into chunks and storing embeddings in Pinecone
         """
         try:
-            # Split text into chunks
+            # Step 1: Split into Document chunks
             chunks = self._split_text(text_content)
-            
-            # Generate embeddings for each chunk
-            chunk_texts = [chunk.page_content for chunk in chunks]
-            embeddings = self.bedrock_service.generate_embeddings(chunk_texts)
-            
-            # Index each chunk
-            indexed_chunks = []
-            for i, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
-                chunk_id = f"{document_id}_chunk_{i}"
-                
-                chunk_metadata = {
-                    'document_id': document_id,
-                    'chunk_index': i,
-                    'chunk_count': len(chunks),
-                    **(metadata or {})
-                }
-                
-                success = self.opensearch_service.index_document(
-                    chunk_id,
-                    chunk.page_content,
-                    embedding,
-                    chunk_metadata
-                )
-                
-                if success:
-                    indexed_chunks.append({
-                        'chunk_id': chunk_id,
-                        'chunk_index': i,
-                        'content_length': len(chunk.page_content)
-                    })
-            
+            logger.info(f"Indexing {len(chunks)} chunks for document {document_id}")
+
+            # Step 2: Extract clean text list for embedding
+            texts = [chunk.page_content for chunk in chunks]
+
+            # Step 3: Generate embeddings from Bedrock
+            embeddings = self.bedrock_service.generate_embeddings(texts)
+
+            # Step 4: Prepare Pinecone vectors (include chunk text in metadata)
+            vectors = []
+            for i, chunk in enumerate(chunks):
+                vectors.append({
+                    "id": f"{document_id}_chunk_{i}",
+                    "values": embeddings[i],
+                    "metadata": {
+                        "document_id": document_id,
+                        "chunk_index": i,
+                        "chunk_count": len(chunks),
+                        "text": chunk.page_content,  # ✅ actual content text
+                        **(metadata or {}),
+                    }
+                })
+
+            # Step 5: Upsert into Pinecone
+            self.pinecone_service.upsert_vectors(vectors)
+
+            logger.info(f"✅ Indexed {len(chunks)} chunks for {document_id}")
             return {
-                'success': True,
-                'document_id': document_id,
-                'total_chunks': len(chunks),
-                'indexed_chunks': len(indexed_chunks),
-                'chunks': indexed_chunks
+                "success": True,
+                "document_id": document_id,
+                "chunk_count": len(chunks),
+                "message": f"Document {document_id} indexed successfully"
             }
-            
+
         except Exception as e:
-            logger.error(f"Error indexing document {document_id}: {e}")
-            return {'error': str(e)}
+            logger.error(f"❌ Error indexing document {document_id}: {e}")
+            return {"error": str(e)}
+
+
     
-    def search_documents(self, query: str, top_k: Optional[int] = None, 
-                        filters: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """
-        Search documents using RAG
+    # def search_documents(self, query: str, top_k: Optional[int] = None, 
+    #                     filters: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    #     """
+    #     Search documents using RAG
         
-        Args:
-            query: Search query
-            top_k: Number of results to return
-            filters: Optional filters to apply
+    #     Args:
+    #         query: Search query
+    #         top_k: Number of results to return
+    #         filters: Optional filters to apply
             
-        Returns:
-            Search results
+    #     Returns:
+    #         Search results
+    #     """
+    #     try:
+    #         top_k = top_k or self.top_k_results
+            
+    #         # Generate query embedding
+    #         query_embedding = self.bedrock_service.generate_embeddings([query])[0]
+            
+    #         # Search for similar chunks
+    #         search_response = self.pinecone_service.search_similar(
+    #             query_embedding,
+    #             top_k,
+    #             filters
+    #         )
+
+    #         # Unwrap results
+    #         if isinstance(search_response, dict) and "results" in search_response:
+    #             similar_chunks = search_response["results"]
+    #         else:
+    #             similar_chunks = search_response
+
+            
+    #         # Filter by similarity threshold
+    #         filtered_chunks = [
+    #             chunk for chunk in similar_chunks 
+    #             if chunk.get('score', 0) >= self.similarity_threshold
+    #         ]
+            
+    #         # Group chunks by document
+    #         document_chunks = self._group_chunks_by_document(filtered_chunks)
+            
+    #         return {
+    #             'success': True,
+    #             'query': query,
+    #             'total_results': len(filtered_chunks),
+    #             'document_results': len(document_chunks),
+    #             'results': document_chunks,
+    #             'similarity_threshold': self.similarity_threshold
+    #         }
+            
+    #     except Exception as e:
+    #         logger.error(f"Error searching documents: {e}")
+    #         return {'error': str(e)}
+
+    def search_documents(self, query: str, top_k: Optional[int] = None,
+                     filters: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
+        Search documents using RAG with improved recall and Bedrock-ready context.
+        """
+
         try:
-            top_k = top_k or self.top_k_results
-            
-            # Generate query embedding
+            top_k = top_k or getattr(self, "top_k_results", 5)
+            similarity_threshold = getattr(self, "similarity_threshold", 0.55)
+
+            # Generate embedding for query
             query_embedding = self.bedrock_service.generate_embeddings([query])[0]
-            
+
             # Search for similar chunks
-            similar_chunks = self.opensearch_service.search_similar(
+            search_response = self.pinecone_service.search_similar(
                 query_embedding,
                 top_k,
                 filters
             )
-            
+
+            # Normalize response
+            if isinstance(search_response, dict) and "results" in search_response:
+                similar_chunks = search_response["results"]
+            else:
+                similar_chunks = search_response or []
+
+            # Standardize chunk structure
+            normalized_chunks = []
+            for chunk in similar_chunks:
+                metadata = chunk.get("metadata", {})
+                normalized_chunks.append({
+                    "id": chunk.get("id", ""),
+                    "score": chunk.get("score", 0.0),
+                    "content": metadata.get("text", ""),
+                    "metadata": metadata
+                })
+
             # Filter by similarity threshold
             filtered_chunks = [
-                chunk for chunk in similar_chunks 
-                if chunk.get('score', 0) >= self.similarity_threshold
+                c for c in normalized_chunks
+                if c["score"] >= similarity_threshold
             ]
-            
+
+            # If nothing survives, take top 3
+            if not filtered_chunks:
+                filtered_chunks = sorted(normalized_chunks, key=lambda x: x["score"], reverse=True)[:3]
+
             # Group chunks by document
             document_chunks = self._group_chunks_by_document(filtered_chunks)
-            
+
+            # Concatenate all retrieved text for Bedrock context
+            context_text = "\n".join(
+                [c["content"] for c in filtered_chunks if c.get("content")]
+            ).strip()
+
             return {
-                'success': True,
-                'query': query,
-                'total_results': len(filtered_chunks),
-                'document_results': len(document_chunks),
-                'results': document_chunks,
-                'similarity_threshold': self.similarity_threshold
+                "success": True,
+                "query": query,
+                "total_results": len(filtered_chunks),
+                "document_results": len(document_chunks),
+                "results": document_chunks,
+                "similarity_threshold": similarity_threshold,
+                "context_text": context_text  # 🧠 usable directly in Bedrock Q&A
             }
-            
+
         except Exception as e:
             logger.error(f"Error searching documents: {e}")
-            return {'error': str(e)}
+            return {"error": str(e)}
+
     
     def hybrid_search(self, query: str, top_k: Optional[int] = None,
                      weight: float = 0.7) -> Dict[str, Any]:
@@ -164,7 +229,7 @@ class RAGSystem:
             query_embedding = self.bedrock_service.generate_embeddings([query])[0]
             
             # Perform hybrid search
-            results = self.opensearch_service.hybrid_search(
+            results = self.pinecone_service.hybrid_search(
                 query_embedding,
                 query,
                 top_k,
@@ -250,34 +315,30 @@ class RAGSystem:
             logger.error(f"Error answering question: {e}")
             return {'error': str(e)}
     
-    def get_document_context(self, document_id: str, query: str, 
-                           top_k: int = 3) -> Dict[str, Any]:
+    def get_document_context(self, document_id: str, query: str, top_k: int = 3) -> Dict[str, Any]:
         """
-        Get relevant context from a specific document
-        
-        Args:
-            document_id: Document ID
-            query: Search query
-            top_k: Number of chunks to return
-            
-        Returns:
-            Document context
+        Get relevant context from a specific document.
         """
         try:
-            # Search within specific document
             filters = {'document_id': document_id}
             search_results = self.search_documents(query, top_k, filters)
-            
+
             if 'error' in search_results:
                 return search_results
-            
-            # Extract context chunks
+
+            if not search_results.get('results'):
+                logger.warning(f"No search results for document_id={document_id}")
+                return {'success': True, 'document_id': document_id, 'context_chunks': [], 'chunk_count': 0}
+
             context_chunks = []
             for doc_result in search_results['results']:
-                if doc_result['document_id'] == document_id:
-                    context_chunks = doc_result['chunks']
+                doc_id = doc_result.get('document_id', '')
+                # ✅ Use substring match (handles chunked IDs)
+                if document_id in doc_id:
+                    context_chunks = doc_result.get('chunks', [])
                     break
-            
+
+            logger.debug(f"Context chunks found: {len(context_chunks)} for doc_id={document_id}")
             return {
                 'success': True,
                 'document_id': document_id,
@@ -285,10 +346,11 @@ class RAGSystem:
                 'context_chunks': context_chunks,
                 'chunk_count': len(context_chunks)
             }
-            
+
         except Exception as e:
             logger.error(f"Error getting document context: {e}")
             return {'error': str(e)}
+
     
     def update_document_index(self, document_id: str, text_content: str,
                             metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -345,7 +407,7 @@ class RAGSystem:
             Index statistics
         """
         try:
-            stats = self.opensearch_service.get_index_stats()
+            stats = self.pinecone_service.get_index_stats()
             
             if stats:
                 return {
@@ -367,6 +429,7 @@ class RAGSystem:
             text: Text to split
             
         Returns:
+            LangChain Document objects
             List of text chunks as Document objects
         """
         try:
@@ -386,45 +449,59 @@ class RAGSystem:
     
     def _group_chunks_by_document(self, chunks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
-        Group chunks by document ID
-        
-        Args:
-            chunks: List of chunk results
-            
-        Returns:
-            List of document results with grouped chunks
+        Group chunks by document ID and extract proper content text.
         """
         try:
-            document_groups = {}
-            
+            document_groups: Dict[str, Dict[str, Any]] = {}
+
             for chunk in chunks:
-                doc_id = chunk['metadata'].get('document_id', 'unknown')
-                
+                metadata = chunk.get('metadata', {}) or {}
+                doc_id = metadata.get('document_id') or chunk.get('id', 'unknown')
+
                 if doc_id not in document_groups:
                     document_groups[doc_id] = {
                         'document_id': doc_id,
-                        'chunks': [],
-                        'metadata': chunk['metadata']
+                        'metadata': metadata,
+                        'chunks': []
                     }
-                
+
+                # ✅ Extract content safely (metadata fallback)
+                content = (
+                    chunk.get('content') or
+                    metadata.get('text') or
+                    metadata.get('chunk_text') or
+                    metadata.get('page_content') or
+                    ''
+                )
+
                 document_groups[doc_id]['chunks'].append({
-                    'chunk_id': chunk['document_id'],
-                    'content': chunk['content'],
-                    'score': chunk['score'],
-                    'metadata': chunk['metadata']
+                    'chunk_id': chunk.get('id', 'unknown'),
+                    'content': content.strip(),
+                    'score': chunk.get('score', 0.0),
+                    'metadata': metadata
                 })
-            
+
             # Sort chunks within each document by score
             for doc_id in document_groups:
                 document_groups[doc_id]['chunks'].sort(
                     key=lambda x: x['score'], reverse=True
                 )
-            
-            return list(document_groups.values())
-            
+
+            grouped = list(document_groups.values())
+            logger.debug(f"Grouped {len(chunks)} chunks into {len(grouped)} document(s)")
+
+            # Optional preview log
+            for doc in grouped:
+                top_chunk = doc['chunks'][0] if doc['chunks'] else {}
+                logger.debug(f"📄 Doc: {doc['document_id']} | Top chunk preview: {top_chunk.get('content', '')[:100]}")
+
+            return grouped
+
         except Exception as e:
             logger.error(f"Error grouping chunks by document: {e}")
             return []
+
+
     
     def _delete_document_chunks(self, document_id: str) -> int:
         """
@@ -439,7 +516,7 @@ class RAGSystem:
         try:
             # Search for all chunks of this document
             filters = {'document_id': document_id}
-            search_results = self.opensearch_service.search_similar(
+            search_results = self.pinecone_service.search_similar(
                 [0.0] * self.vector_dimension,  # Dummy embedding
                 1000,  # Large number to get all chunks
                 filters
@@ -448,7 +525,7 @@ class RAGSystem:
             deleted_count = 0
             for chunk in search_results:
                 chunk_id = chunk['document_id']
-                if self.opensearch_service.delete_document(chunk_id):
+                if self.pinecone_service.delete_document(chunk_id):
                     deleted_count += 1
             
             return deleted_count
@@ -465,7 +542,7 @@ class RAGSystem:
             Initialization result
         """
         try:
-            success = self.opensearch_service.create_index(self.vector_dimension)
+            success = self.pinecone_service.create_index(self.vector_dimension)
             
             if success:
                 return {

@@ -104,6 +104,7 @@ celerybeat.pid
 # Environments
 .env
 .venv
+.venv/
 env/
 venv/
 ENV/
@@ -134,6 +135,7 @@ aws-credentials.json
 
 # IDE files
 .vscode/
+!.vscode/launch.json
 .idea/
 *.swp
 *.swo
